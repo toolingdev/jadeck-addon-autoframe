@@ -1,0 +1,113 @@
+name: release
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test -race ./...
+
+  # The ONNX Runtime binding needs cgo, so each platform builds on its own
+  # runner (ptz-addon build cross-compiles with cgo off and can't).
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, plat: windows-amd64, exe: addon.exe }
+          - { os: ubuntu-latest, plat: linux-amd64, exe: addon }
+          - { os: ubuntu-24.04-arm, plat: linux-arm64, exe: addon }
+          - { os: macos-latest, plat: darwin-arm64, exe: addon }
+    runs-on: ${{ matrix.os }}
+    # macOS runners are sometimes unavailable; the release then ships the
+    # other platforms and says so.
+    continue-on-error: ${{ matrix.plat == 'darwin-arm64' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          v=0.0.0-dev
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; fi
+          go build -trimpath -ldflags "-s -w -X main.Version=$v" -o "bin/${{ matrix.plat }}/${{ matrix.exe }}" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-${{ matrix.plat }}
+          path: bin/${{ matrix.plat }}/${{ matrix.exe }}
+          if-no-files-found: error
+
+  pack:
+    needs: build
+    if: always() && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bin-*
+          path: artifacts
+      - name: Pack and sign
+        env:
+          PTZ_SIGNING_KEY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.PTZ_SIGNING_KEY || '' }}
+        run: |
+          set -e
+          for d in artifacts/bin-*; do
+            p="${d#artifacts/bin-}"
+            mkdir -p "bin/$p"
+            cp "$d"/* "bin/$p/"
+            chmod +x "bin/$p"/*
+          done
+          ls -R bin
+          test -x bin/linux-amd64/addon
+          bin/linux-amd64/addon --manifest > addon.json
+          mkdir -p dist
+          if [[ "$GITHUB_REF" == refs/tags/v* && -z "$PTZ_SIGNING_KEY" ]]; then
+            echo "::error::PTZ_SIGNING_KEY is not set on this repository"; exit 1
+          fi
+          go run ./cmd/mkpack . dist/autoframe.ptzaddon
+          missing=""
+          for p in windows-amd64 linux-amd64 linux-arm64 darwin-arm64; do
+            [ -d "bin/$p" ] || missing="$missing $p"
+          done
+          echo "missing=$missing" >> "$GITHUB_ENV"
+          if [ -n "$missing" ]; then echo "::warning::built without:$missing"; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: autoframe.ptzaddon
+          path: dist/autoframe.ptzaddon
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/autoframe.ptzaddon --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/autoframe.ptzaddon --generate-notes
+          fi
+          if [ -n "$missing" ]; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file - <<NOTES
+          Built without:$missing (that runner was unavailable). Re-run the workflow to add it.
+          NOTES
+          fi

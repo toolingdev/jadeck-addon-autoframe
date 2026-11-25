@@ -109,12 +109,14 @@ func open(raw json.RawMessage) (*Conn, error) {
 		_ = json.Unmarshal(b, &c.set)
 	}
 	builtin := cfg.Detector == "" || cfg.Detector == "builtin"
-	if builtin && !lib.BuiltinModelReady() {
-		// First run: fetch the model in the background; the widget shows
-		// the progress and the cameras start once it's ready.
-		c.detNote = "downloading the people finder (36 MB)"
+	needRuntime := cfg.Detector != "service" && !lib.RuntimeReady(cfg.Runtime)
+	needModel := builtin && !lib.BuiltinModelReady()
+	if needRuntime || needModel {
+		// First run: fetch what's missing in the background; the widget
+		// shows the progress and the cameras start once it's ready.
+		c.detNote = "getting ready"
 		c.ctx, c.stop = context.WithCancel(context.Background())
-		go c.fetchModel(dc)
+		go c.fetchParts(dc, needRuntime, needModel)
 	} else {
 		det, err := lib.OpenDetector(dc)
 		if err != nil {
@@ -128,49 +130,71 @@ func open(raw json.RawMessage) (*Conn, error) {
 	return c, nil
 }
 
-// fetchModel downloads the built-in model, then opens the detector.
-// A failed download retries every minute.
-func (c *Conn) fetchModel(dc lib.DetectorConfig) {
-	for c.ctx.Err() == nil {
-		last := -1
-		err := lib.DownloadBuiltinModel(c.ctx, func(done, total int64) {
-			pct := int(done * 100 / total)
-			if pct != last && pct%5 == 0 {
-				last = pct
-				c.mu.Lock()
-				c.detNote = fmt.Sprintf("downloading the people finder: %d%%", pct)
-				c.mu.Unlock()
-				c.changed()
-			}
-		})
-		if err == nil {
-			det, err2 := lib.OpenDetector(dc)
-			c.mu.Lock()
-			if err2 != nil {
-				c.detNote, c.err = "", "detector: "+err2.Error()
-			} else {
-				c.det, c.detNote, c.err = det, "", ""
-			}
-			c.mu.Unlock()
-			c.changed()
-			return
-		}
-		if c.ctx.Err() != nil {
-			return
-		}
+// fetchParts downloads ONNX Runtime and/or the built-in model, then opens
+// the detector. A failed download retries every minute.
+func (c *Conn) fetchParts(dc lib.DetectorConfig, needRuntime, needModel bool) {
+	type part struct {
+		what string
+		get  func(context.Context, func(done, total int64)) error
+	}
+	var parts []part
+	if needRuntime {
+		parts = append(parts, part{"ONNX Runtime (about 20 MB)", lib.DownloadRuntime})
+	}
+	if needModel {
+		parts = append(parts, part{"the people finder (36 MB)", lib.DownloadBuiltinModel})
+	}
+	note := func(s string) {
 		c.mu.Lock()
-		c.detNote, c.err = "", err.Error()+" (trying again in a minute)"
+		c.detNote = s
 		c.mu.Unlock()
 		c.changed()
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-time.After(time.Minute):
-		}
-		c.mu.Lock()
-		c.err, c.detNote = "", "downloading the people finder (36 MB)"
-		c.mu.Unlock()
 	}
+	for _, p := range parts {
+		for c.ctx.Err() == nil {
+			last := -1
+			note("downloading " + p.what)
+			err := p.get(c.ctx, func(done, total int64) {
+				if total <= 0 {
+					return
+				}
+				if pct := int(done * 100 / total); pct != last && pct%5 == 0 {
+					last = pct
+					note(fmt.Sprintf("downloading %s: %d%%", p.what, pct))
+				}
+			})
+			if err == nil {
+				break
+			}
+			if c.ctx.Err() != nil {
+				return
+			}
+			c.mu.Lock()
+			c.detNote, c.err = "", err.Error()+" (trying again in a minute)"
+			c.mu.Unlock()
+			c.changed()
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+			c.mu.Lock()
+			c.err = ""
+			c.mu.Unlock()
+		}
+	}
+	if c.ctx.Err() != nil {
+		return
+	}
+	det, err := lib.OpenDetector(dc)
+	c.mu.Lock()
+	if err != nil {
+		c.detNote, c.err = "", "detector: "+err.Error()
+	} else {
+		c.det, c.detNote, c.err = det, "", ""
+	}
+	c.mu.Unlock()
+	c.changed()
 }
 
 // detector is the open detector, nil while the model downloads.
@@ -186,7 +210,7 @@ func (c *Conn) describe() string {
 		return c.det.Describe()
 	}
 	if c.detNote != "" {
-		return "RTMO-s (built in) · " + c.detNote
+		return c.detNote
 	}
 	return "people finder not ready"
 }

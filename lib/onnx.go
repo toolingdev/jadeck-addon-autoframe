@@ -1,8 +1,10 @@
 package lib
 
-// ONNX models, run with ONNX Runtime: on the GPU through DirectML on
-// Windows (any DirectX 12 card, no CUDA install), the CPU elsewhere. Families say how a model wants its picture and
-// how it lays out its answer:
+// ONNX models, run with ONNX Runtime on the CPU. (A library built with
+// DirectML uses the graphics card on Windows when it's given through
+// ONNXRUNTIME_LIB; the one the add-on downloads is the CPU build.)
+// Families say how a model wants its picture and how it lays out its
+// answer:
 //
 //	rtmo  RTMO (OpenMMLab, Apache-2.0): people and 17 body points in one
 //	      pass. Input 1×3×640×640 BGR 0..255; outputs dets [1,N,5]
@@ -51,12 +53,14 @@ func runtimeLibrary(given string) (string, error) {
 		names = []string{filepath.Join(dir, "libonnxruntime.so"), filepath.Join(dir, "lib", "libonnxruntime.so"),
 			"/usr/lib/libonnxruntime.so", "/usr/local/lib/libonnxruntime.so"}
 	}
+	// the one the add-on downloaded (runtime.go) comes first
+	names = append([]string{runtimeHome()}, names...)
 	for _, n := range names {
 		if _, err := os.Stat(n); err == nil {
 			return n, nil
 		}
 	}
-	return "", errors.New("ONNX Runtime isn't installed next to the add-on")
+	return "", errors.New("ONNX Runtime isn't installed")
 }
 
 func initRuntime(lib string) error {

@@ -6,7 +6,8 @@ First release, shadow mode: it shows what it would do and never moves a
 camera.
 
 - Finds people in each picked camera's picture with the built-in model
-  (RTMO-s, downloaded and checked the first time it runs), your own ONNX
+  (RTMO-s) and ONNX Runtime, both downloaded and checked the first time it
+  runs; or your own ONNX
   model, or a detection service on your network.
 - Keeps each person's identity from frame to frame; tap a person to follow
   them.
