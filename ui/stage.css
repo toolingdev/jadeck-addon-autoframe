@@ -1,0 +1,41 @@
+html, body { height: 100%; margin: 0; background: transparent; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 10px; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-content: start; }
+.empty { color: var(--color-muted); font-size: 12px; padding: 18px 6px; text-align: center; grid-column: 1 / -1; }
+.badge { font-size: 9px; font-weight: 700; letter-spacing: .06em; padding: 3px 7px; border-radius: 9px;
+  background: var(--jk-recess); border: 1px solid var(--color-line-strong); color: var(--color-muted); text-transform: uppercase; }
+
+.cam { background: linear-gradient(var(--jk-card-top), var(--jk-card-bot)); border: 1px solid var(--color-line);
+  border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  container-type: inline-size; }
+.body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ctl { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* A wide card (one camera in a wide widget): picture left, controls right,
+   and the picture never taller than the widget. */
+@container (min-width: 600px) {
+  .body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 12px; }
+  .stage { width: 100%; max-width: calc((100vh - 92px) * 16 / 9); justify-self: center; }
+}
+.cam-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cam-name { font-weight: 700; font-size: 13px; color: var(--color-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cam-via { font-size: 10px; font-weight: 600; letter-spacing: .05em; color: var(--color-dim); text-transform: uppercase; white-space: nowrap; }
+.cam-top .badge { margin-left: auto; }
+
+.stage { position: relative; aspect-ratio: 16 / 9; background: var(--jk-recess); border: 1px solid var(--color-line);
+  border-radius: 8px; overflow: hidden; touch-action: none; cursor: crosshair; }
+.stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.stage svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.stage .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--color-muted); font-size: 12px; text-align: center; padding: 12px; }
+.hint { font-size: 10px; line-height: 1.4; color: var(--color-dim); }
+
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.row .lbl { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--color-muted); }
+.row .jk-seg { flex: 1; min-width: 0; }
+.move { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #c9ced6; min-width: 0; }
+.move i { width: 8px; height: 8px; border-radius: 50%; background: var(--color-pvw); flex: none; }
+.move.go i { background: var(--color-accent); }
+.move.lost i { background: var(--color-dim); }
+.move span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.foot { display: flex; justify-content: space-between; font-size: 10px; color: var(--color-dim); gap: 8px; }
